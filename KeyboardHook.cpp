@@ -19,20 +19,22 @@
 #include <stdio.h>
 
 /*
- * This DLL provides a keyboard hook procedure that filters specific keyboard
- * input as generated from some keyboards whenever the finger swipes from the
- * left, upper or right edge of the integrated touch pad onto the touchpad.
- *
- * The idea is to filter out all LEFT-WINDOWS key combinations. However, to
- * allow hotkey combinations with LEFT-WINDOWS key, a key press will be generated
- * after 50 milliseconds if no further keyboard events arrive in the meantime.
- *
- * The keyboard hook can generate a log file that contains the contents of the
- * keyboard events that occur, inclusive a time stamp. To activate the log,
- * set the name of the log file in environment variable NoEdgeLog:
- *	set NoEdgeLog=<name>
- * To deactivate the log, set the log file name to nul (the default):
- *	set NoEdgeLog=nul
+  This DLL provides a keyboard hook procedure that filters specific keyboard
+  input as generated from some keyboards whenever the finger swipes from the
+  left, upper or right edge of the integrated touch pad onto the touchpad.
+ 
+  The idea is to filter out all LEFT-WINDOWS key combinations. However, to
+  allow hotkey combinations with LEFT-WINDOWS key, a key press will be generated
+  after 100 milliseconds if no further keyboard events arrive in the meantime
+  (100 milliseconds is the default, it can be changed via environment variable
+  NoEdgeTimeout. Minimum 32 milliseconds, maximum 1024 milliseconds).
+ 
+  The keyboard hook can generate a log file that contains the contents of the
+  keyboard events that occur, inclusive a time stamp. To activate the log,
+  set the name of the log file in environment variable NoEdgeLog:
+ 	set NoEdgeLog=<name>
+  To deactivate the log, set the log file name to nul (the default):
+ 	set NoEdgeLog=nul
  */
 
 #define PRINT 0
@@ -101,14 +103,39 @@ static const char* getState() {
 
 static INPUT LastKey;
 static UINT_PTR TimerID;
+static DWORD Timeout;
 
+/*
+	Timeout handler, will be invoked Timeout milliseconds after reception
+	(and discarding) of a LEFT-WINDOWS key press event. If another key input
+	event occurred in the meantime, the timer will be discarded.
+*/
 void __stdcall NoEdgeWindowsKeyTimeout(HWND, UINT, UINT_PTR, DWORD) {
 	if (KeyState == NoEdgeWinPressed)
 		SendInput(1, &LastKey, sizeof LastKey);
 }
 
 /*
-	The keyboard hook procedure.
+	A small procedure that sets the time component of the prepared INPUT
+	structure, can be used to set the current time from WM_TIMER event
+	before calling TranslateMessage and DispatchMessage to create a better
+	key press event during invokation of NoEdgeWindowsKeyTimeout.
+*/
+extern "C" __declspec(dllexport)
+void SetTimerTick(DWORD tick) {
+	LastKey.ki.time = tick;
+}
+
+/*
+	The keyboard hook procedure. Handles LEFT-WINDOWS key press events as follows:
+	- Buffers the event and sets a timer of NoEdgeTimeout milliseconds
+	- If another key event arrives before the timer elapses, the timer will be killed
+	  and all key events until (and inclusive) LEFT-WINDOWS release will be discarded.
+	- If the timer elapses without any key input, the timer function generates a 
+	  LEFT-WINDOW key press event with all parameters set as in the original key event.
+	- The controlling process can use the SetTimerTick function to replace the time
+	  component of the original key event with the time component of the WM_TIMER
+	  message.
 */
 extern "C" __declspec(dllexport)
 LRESULT CALLBACK NoEdgeKeyboardHook(int code, WPARAM wp, LPARAM lp) {
@@ -136,7 +163,7 @@ LRESULT CALLBACK NoEdgeKeyboardHook(int code, WPARAM wp, LPARAM lp) {
 					LastKey.ki.time = hs->time;
 					LastKey.ki.wScan = (WORD)hs->scanCode;
 					LastKey.ki.wVk = (WORD)hs->vkCode;
-					TimerID = SetTimer(NULL, 0, 45, NoEdgeWindowsKeyTimeout);
+					TimerID = SetTimer(NULL, 0, Timeout, NoEdgeWindowsKeyTimeout);
 					return -1;
 				}
 				break;
@@ -165,7 +192,8 @@ LRESULT CALLBACK NoEdgeKeyboardHook(int code, WPARAM wp, LPARAM lp) {
 
 /*
 	DLL initialization / finalization:
-	Open / close the log file.
+	- Open / close the log file (environment variable NoEdgeLog),
+	- Initialize timeout (from environment variable NoEdgeTimeout).
 */
 extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID res) {
 	switch (reason) {
@@ -184,6 +212,17 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID res) {
 			fopen_s(&Fp, buffer, "a");
 			if (Fp == NULL)
 				return FALSE;
+			delete[] buffer;
+			buffer = new char[100];
+			if ((len = GetEnvironmentVariableA("NoEdgeTimeout", buffer, 100)) <= 0 || len >= 5)
+				Timeout = 100;
+			else if ((len = atoi(buffer)) < 32)
+				Timeout = 32;
+			else if (len > 1024)
+				Timeout = 1024;
+			else
+				Timeout = len;
+			fprintf(Fp, "NoEdge Timeout: %d\n", Timeout);
 			KeyState = NoEdgeIdle;
 		}
 		break;
