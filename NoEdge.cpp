@@ -39,6 +39,18 @@
 #endif
 
 /*
+  This function converts two strings to lower case and returns true if the resulting strings are equal, otherwise false
+*/
+	static bool equal(const char*s1, const char*s2) {
+		while (tolower(*s1) == tolower(*s2)) {
+			if (*s1 == 0)
+				return true;
+			s1++, s2++;
+		}
+		return false;
+	}
+
+/*
   This program installs the "NoEdgeShortcuts" keyboard hook and enters the Windows
   message loop. This allows the hook to run as expected.
  */
@@ -48,6 +60,28 @@ int main(int n, char **s) {
 #else
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE dummy, char* command, int minmaxnormal) {
 #endif
+	char nohookprio[20];
+	int  len;
+	if ((len = GetEnvironmentVariableA("NoEdgePriority", nohookprio, sizeof nohookprio)) > 0 && len < sizeof nohookprio) {
+		int prio = NORMAL_PRIORITY_CLASS;
+		if (equal(nohookprio, "realtime"))
+			prio = REALTIME_PRIORITY_CLASS;
+		else if (equal(nohookprio, "high"))
+			prio = HIGH_PRIORITY_CLASS;
+		else if (equal(nohookprio, "abovenormal"))
+			prio = ABOVE_NORMAL_PRIORITY_CLASS;
+		else if (equal(nohookprio, "belownormal"))
+			prio = BELOW_NORMAL_PRIORITY_CLASS;
+		else if (equal(nohookprio, "idle"))
+			prio = IDLE_PRIORITY_CLASS;
+		if (GetPriorityClass(GetCurrentProcess()) != prio) {
+			// Put process into given priority class and select highest threadpriority to ensure
+			// fast hook processing. Ignore possible failure; if an error occurs, the only
+			// effect might be minimal slower hook processing...
+			SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+		}
+	}
 	// Retrieve the keyboard hook dll
 	HINSTANCE hi = LoadLibrary("NoEdgeShortcuts.dll");
 	if (hi == NULL)
@@ -63,13 +97,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE dummy, char* command, int minma
 	HHOOK hookhd = SetWindowsHookExA(WH_KEYBOARD_LL, hook, hi, 0);
 	if (hookhd == NULL)
 		errorExit("Cannot set keyboard hook", 3);
-#ifdef INCREMENTPRIORITY
-	// Put process into high priority class and select highest priority to ensure
-	// fast hook processing. Ignore possible failure; if an error occurs, the only
-	// effect might be minimal slower hook processing...
-	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-#endif
 	// Enter the message loop
 	while (1) {
 		MSG msg;
