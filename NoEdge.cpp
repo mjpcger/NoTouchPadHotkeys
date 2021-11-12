@@ -63,10 +63,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE dummy, char* command, int minma
 	char nohookprio[20];
 	int  len;
 	if ((len = GetEnvironmentVariableA("NoEdgePriority", nohookprio, sizeof nohookprio)) > 0 && len < sizeof nohookprio) {
-		int prio = NORMAL_PRIORITY_CLASS;
-		if (equal(nohookprio, "realtime"))
-			prio = REALTIME_PRIORITY_CLASS;
-		else if (equal(nohookprio, "high"))
+		DWORD prio = NORMAL_PRIORITY_CLASS;
+		if (equal(nohookprio, "high"))
 			prio = HIGH_PRIORITY_CLASS;
 		else if (equal(nohookprio, "abovenormal"))
 			prio = ABOVE_NORMAL_PRIORITY_CLASS;
@@ -78,7 +76,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE dummy, char* command, int minma
 			// Put process into given priority class and select highest threadpriority to ensure
 			// fast hook processing. Ignore possible failure; if an error occurs, the only
 			// effect might be minimal slower hook processing...
-			SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+			SetPriorityClass(GetCurrentProcess(), prio);
 			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 		}
 	}
