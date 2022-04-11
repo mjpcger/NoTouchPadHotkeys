@@ -17,6 +17,7 @@
 //#define CONSOLEPROGRAM
 
 #include <Windows.h>
+
 #ifdef CONSOLEPROGRAM
 #	include <stdio.h>
 	const char *Arg0;
@@ -63,21 +64,28 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE dummy, char* command, int minma
 	char nohookprio[20];
 	int  len;
 	if ((len = GetEnvironmentVariableA("NoEdgePriority", nohookprio, sizeof nohookprio)) > 0 && len < sizeof nohookprio) {
-		DWORD prio = NORMAL_PRIORITY_CLASS;
-		if (equal(nohookprio, "high"))
-			prio = HIGH_PRIORITY_CLASS;
-		else if (equal(nohookprio, "abovenormal"))
-			prio = ABOVE_NORMAL_PRIORITY_CLASS;
-		else if (equal(nohookprio, "belownormal"))
-			prio = BELOW_NORMAL_PRIORITY_CLASS;
-		else if (equal(nohookprio, "idle"))
-			prio = IDLE_PRIORITY_CLASS;
-		if (GetPriorityClass(GetCurrentProcess()) != prio) {
-			// Put process into given priority class and select highest threadpriority to ensure
-			// fast hook processing. Ignore possible failure; if an error occurs, the only
-			// effect might be minimal slower hook processing...
-			SetPriorityClass(GetCurrentProcess(), prio);
-			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+		DWORD pprio = NORMAL_PRIORITY_CLASS;
+		DWORD tprio = THREAD_PRIORITY_NORMAL;
+		if (equal(nohookprio, "high")) {
+			pprio = HIGH_PRIORITY_CLASS;
+			tprio = THREAD_PRIORITY_HIGHEST;
+		}
+		else if (equal(nohookprio, "abovenormal")) {
+			pprio = ABOVE_NORMAL_PRIORITY_CLASS;
+			tprio = THREAD_PRIORITY_ABOVE_NORMAL;
+		}
+		else if (equal(nohookprio, "belownormal")) {
+			pprio = BELOW_NORMAL_PRIORITY_CLASS;
+			tprio = THREAD_PRIORITY_BELOW_NORMAL;
+		} else if (equal(nohookprio, "idle")) {
+			pprio = IDLE_PRIORITY_CLASS;
+			tprio = THREAD_PRIORITY_IDLE;
+		}
+		if (GetPriorityClass(GetCurrentProcess()) != pprio || GetThreadPriority(GetCurrentThread()) != tprio) {
+			// Put process into given priority class and select matching thread priority to ensure
+			// expected hook processing.
+			len = SetPriorityClass(GetCurrentProcess(), pprio);
+			len = SetThreadPriority(GetCurrentThread(), tprio);
 		}
 	}
 	// Retrieve the keyboard hook dll
@@ -89,8 +97,19 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE dummy, char* command, int minma
 	// A function that sets the timer component of the WM_TIMER message into the stored
 	// last key event of the hook.
 	void(*SetTimerTick)(DWORD) = (void(*)(DWORD))GetProcAddress(hi, "SetTimerTick");
+	// A function that returns the lowest relevant function address and the minimum length to be locked
+	void(*GetDllInfo)(void**, SIZE_T*) = (void(*)(void**, SIZE_T*))GetProcAddress(hi, "GetDllInfo");
 	if (hook == NULL)
 		errorExit("Cannot retrieve hook address NoEdgeKeyboardHook", 2);
+	if (SetTimerTick == NULL)
+		errorExit("Cannot retrieve hook address SetTimerTick", 2);
+	if (GetDllInfo == NULL)
+		errorExit("Cannot retrieve minimum hook size", 2);
+	SIZE_T minlength[2];
+	void *addresses[2];
+	GetDllInfo(addresses, minlength);
+	if (!VirtualLock(equal, 1000) || !VirtualLock(addresses[0], minlength[0]) || !VirtualLock(addresses[1], minlength[1]))
+		len = GetLastError();
 	// Install the (global) keyboard hook
 	HHOOK hookhd = SetWindowsHookExA(WH_KEYBOARD_LL, hook, hi, 0);
 	if (hookhd == NULL)

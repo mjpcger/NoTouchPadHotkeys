@@ -39,22 +39,54 @@
 
 #define PRINT 0
 
-FILE *Fp;
+__declspec(dllexport)
+struct {
+	FILE *Fp;
+	char KeyDown[10];
+	char KeyUp[10];
+	char SysKeyDown[15];
+	char SysKeyUp[15];
+	char InvalidParam[20];
+	char hexdigits[20];
+	char Idle[10];
+	char GotHotKey[15];
+	char InHotKey[15];
+	char WaitHotKeyRelease[20];
+	char format[100];
+	INPUT LastKey;
+	UINT_PTR TimerID;
+	DWORD Timeout;
+} data = {
+	NULL,
+	"KEYDOWN",
+	"KEYUP",
+	"SYSKEYDOWN",
+	"SYSKEYUP",
+	"Invalid WPARAM",
+	"0123456789abcdef",
+	"Idle",
+	"GotHotKey",
+	"InHotKey",
+	"WaitHotKeyRelease",
+	"WParam: %s, LPARAM: vkCode: %x, scCode: %x, flags: %x, time: %u, extra: %s, KeyState: %s\n"
+};
+
 
 /*
 	Function (const char*)getWPString((WPARAM) wp):
 	Returns a C-string representation of the WPARAM value.
 */
+
 static const char* getWPString(WPARAM wp) {
 	if (wp == WM_KEYDOWN)
-		return "KEYDOWN";
+		return data.KeyDown;
 	if (wp == WM_KEYUP)
-		return "KEYUP";
+		return data.KeyUp;
 	if (wp == WM_SYSKEYDOWN)
-		return "SYSKEYDOWN";
+		return data.SysKeyDown;
 	if (wp == WM_SYSKEYUP)
-		return "SYSKEYUP";
-	return "Invalid WPARAM";
+		return data.SysKeyUp;
+	return data.InvalidParam;
 }
 
 /*
@@ -65,7 +97,7 @@ static const char* getWPString(WPARAM wp) {
 static const char*getExtra(ULONG_PTR extra, char *buffer) {
 	int i, j;
 	for (i = 0; extra != 0; i++, extra >>= 4)
-		buffer[i] = "0123456789abcdef"[extra & 0xf];
+		buffer[i] = data.hexdigits[extra & 0xf];
 	if (i == 0)
 		buffer[i++] = '0';
 	buffer[i] = 0;
@@ -91,19 +123,15 @@ static enum {
 static const char* getState() {
 	switch (KeyState) {
 	case NoEdgeIdle:
-		return "Idle";
+		return data.Idle;
 	case NoEdgeWinPressed:
-		return "GotHotKey";
+		return data.GotHotKey;
 	case NoEdgeWaitWinRelease:
-		return "InHotKey";
+		return data.InHotKey;
 	case NoEdgeIgnoreKeyEvents:
-		return "WaitHotKeyRelease";
+		return data.WaitHotKeyRelease;
 	}
 }
-
-static INPUT LastKey;
-static UINT_PTR TimerID;
-static DWORD Timeout;
 
 /*
 	Timeout handler, will be invoked Timeout milliseconds after reception
@@ -112,7 +140,7 @@ static DWORD Timeout;
 */
 void __stdcall NoEdgeWindowsKeyTimeout(HWND, UINT, UINT_PTR, DWORD) {
 	if (KeyState == NoEdgeWinPressed)
-		SendInput(1, &LastKey, sizeof LastKey);
+		SendInput(1, &data.LastKey, sizeof data.LastKey);
 }
 
 /*
@@ -123,7 +151,7 @@ void __stdcall NoEdgeWindowsKeyTimeout(HWND, UINT, UINT_PTR, DWORD) {
 */
 extern "C" __declspec(dllexport)
 void SetTimerTick(DWORD tick) {
-	LastKey.ki.time = tick;
+	data.LastKey.ki.time = tick;
 }
 
 /*
@@ -141,9 +169,9 @@ extern "C" __declspec(dllexport)
 LRESULT CALLBACK NoEdgeKeyboardHook(int code, WPARAM wp, LPARAM lp) {
 	if (code == HC_ACTION) {
 		KBDLLHOOKSTRUCT *hs = (KBDLLHOOKSTRUCT*)lp;
-		if (Fp != NULL) {
+		if (data.Fp != NULL) {
 			char buffer[50];
-			fprintf(Fp, "WParam: %s, LPARAM: vkCode: %x, scCode: %x, flags: %x, time: %u, extra: %s, KeyState: %s\n",
+			fprintf(data.Fp, data.format,
 				// time,
 				getWPString(wp),
 				hs->vkCode,
@@ -157,19 +185,19 @@ LRESULT CALLBACK NoEdgeKeyboardHook(int code, WPARAM wp, LPARAM lp) {
 			case NoEdgeIdle:
 				if (wp == WM_KEYDOWN && hs->scanCode == 0x5b && hs->vkCode == 0x5b) {
 					KeyState = NoEdgeWinPressed;
-					LastKey.type = INPUT_KEYBOARD;
-					LastKey.ki.dwExtraInfo = hs->dwExtraInfo;
-					LastKey.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
-					LastKey.ki.time = hs->time;
-					LastKey.ki.wScan = (WORD)hs->scanCode;
-					LastKey.ki.wVk = (WORD)hs->vkCode;
-					TimerID = SetTimer(NULL, 0, Timeout, NoEdgeWindowsKeyTimeout);
+					data.LastKey.type = INPUT_KEYBOARD;
+					data.LastKey.ki.dwExtraInfo = hs->dwExtraInfo;
+					data.LastKey.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
+					data.LastKey.ki.time = hs->time;
+					data.LastKey.ki.wScan = (WORD)hs->scanCode;
+					data.LastKey.ki.wVk = (WORD)hs->vkCode;
+					data.TimerID = SetTimer(NULL, 0, data.Timeout, NoEdgeWindowsKeyTimeout);
 					return -1;
 				}
 				break;
 			case NoEdgeWinPressed:
-				if (TimerID != 0)
-					KillTimer(NULL, TimerID);
+				if (data.TimerID != 0)
+					KillTimer(NULL, data.TimerID);
 				if (wp != WM_KEYDOWN || hs->scanCode != 0x5b || hs->vkCode != 0x5b) {
 					KeyState = NoEdgeIgnoreKeyEvents;
 			case NoEdgeIgnoreKeyEvents:
@@ -191,6 +219,45 @@ LRESULT CALLBACK NoEdgeKeyboardHook(int code, WPARAM wp, LPARAM lp) {
 }
 
 /*
+	Returns lowest function and data address of keyboard hook dll in parameter addresses and the corresponding
+	estimated code and data length in minlength.
+*/
+extern "C" __declspec(dllexport)
+void GetDllInfo(void *addresses[2], SIZE_T minlength[2]) {
+	SIZE_T minaddr = -1, maxaddr = 0, current;
+	minaddr = maxaddr = (unsigned long long)getWPString;
+	if ((current = (unsigned long long)getExtra) < minaddr)
+		minaddr = current;
+	else if (current > maxaddr)
+		maxaddr = current;
+	if ((current = (unsigned long long)getState) < minaddr)
+		minaddr = current;
+	else if (current > maxaddr)
+		maxaddr = current;
+	if ((current = (unsigned long long)NoEdgeWindowsKeyTimeout) < minaddr)
+		minaddr = current;
+	else if (current > maxaddr)
+		maxaddr = current;
+	if ((current = (unsigned long long)SetTimerTick) < minaddr)
+		minaddr = current;
+	else if (current > maxaddr)
+		maxaddr = current;
+	if ((current = (unsigned long long)NoEdgeKeyboardHook) < minaddr)
+		minaddr = current;
+	else if (current > maxaddr)
+		maxaddr = current;
+	if (addresses != NULL) {
+		*addresses = (void*)minaddr;
+		addresses[1] = &data;
+	}
+	if (minlength != NULL) {
+		// We assume the functions are smaller than 1000 bytes
+		*minlength = maxaddr - minaddr + 1000;
+		minlength[1] = sizeof data;
+	}
+}
+
+/*
 	DLL initialization / finalization:
 	- Open / close the log file (environment variable NoEdgeLog),
 	- Initialize timeout (from environment variable NoEdgeTimeout).
@@ -209,26 +276,26 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID res) {
 				buffer = new char[len];
 				buffer[len = GetEnvironmentVariableA("NoEdgeLog", buffer, len)] = 0;
 			}
-			fopen_s(&Fp, buffer, "a");
-			if (Fp == NULL)
+			fopen_s(&data.Fp, buffer, "a");
+			if (data.Fp == NULL)
 				return FALSE;
 			delete[] buffer;
 			buffer = new char[100];
 			if ((len = GetEnvironmentVariableA("NoEdgeTimeout", buffer, 100)) <= 0 || len >= 5)
-				Timeout = 100;
+				data.Timeout = 100;
 			else if ((len = atoi(buffer)) < 32)
-				Timeout = 32;
+				data.Timeout = 32;
 			else if (len > 1024)
-				Timeout = 1024;
+				data.Timeout = 1024;
 			else
-				Timeout = len;
-			fprintf(Fp, "NoEdge Timeout: %d\n", Timeout);
+				data.Timeout = len;
+			fprintf(data.Fp, "NoEdge Timeout: %d\n", data.Timeout);
 			KeyState = NoEdgeIdle;
 		}
 		break;
 	case DLL_PROCESS_DETACH:
-		if (Fp != NULL)
-			fclose(Fp);
+		if (data.Fp != NULL)
+			fclose(data.Fp);
 	}
 	return TRUE;
 }
